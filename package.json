@@ -1,0 +1,14 @@
+{
+  "name": "stocks",
+  "version": "1.0.0",
+  "description": "Playing with stocks",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "request": "^2.88.0"
+  }
+}
