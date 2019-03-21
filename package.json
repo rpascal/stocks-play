@@ -4,7 +4,10 @@
   "description": "Playing with stocks",
   "main": "index.js",
   "scripts": {
-    "start": "node index.js"
+    "build": "tsc --build",
+    "build-start": "npm run build & npm run start",
+    "start": "node ./dist/index.js",
+    "watch": "tsc --watch"
   },
   "author": "",
   "license": "ISC",

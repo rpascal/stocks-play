@@ -1,4 +1,4 @@
-var request = require('request');
+import * as request from 'request';
 
 const priceKey = '1. open';
 
@@ -9,49 +9,64 @@ const url = `https://www.alphavantage.co/query?function=TIME_SERIES_INTRADAY&out
 
 console.log(url);
 
+interface Share{
+    price: number;
+    stocks: Stock[];
+}
 
-class Stock {
-    // money;
-    // symbol;
-    // amountOwned;
+interface Stock {
+    price: number;
+    date: Date;
+    symbol: string;
+}
 
-    constructor(symbol) {
-        this.symbol = symbol;
-        this.money = 1000;
-        this.amountOwned = 0;
+class StockSession {
+    money: number;
+    stocks: Stock[];
+    get stocksOwned() {
+        return this.stocks.length;
     }
 
-
+    constructor() {
+        this.money = 1000;
+        this.stocks = [];
+    }
 
     numCanBuy(price) {
         return Math.floor(this.money / price);
     }
 
-    buy(amount, price) {
-        this.amountOwned = amount;
-        this.money -= amount * price;
+    buy(stock: Stock) {
+        this.stocks.push(stock);
+        this.money -= stock.price;
     }
 
-    sell(amount, price) {
-        this.money += amount * price;
-        this.amountOwned -= amount;
+    buyMax(stock: Stock) {
+        const canBuy = this.numCanBuy(stock.price);
+        for (let i = 0; i < canBuy; i++) {
+            this.buy(stock);
+        }
+
+    }
+
+    sell(stock: Stock) {
+        this.stocks.filter(item => item != stock);
+        this.money += stock.price;
     }
 
     sellAll(price) {
+        this.stocks.forEach(item)
         this.sell(this.amountOwned, price);
     }
-
-
 }
 
-request(url, function (error, response, body) {
+request(url, function(error, response, body) {
     // Oldest first in array
     const dataArray = parseResponse(body);
 
     let boughtInPrice;
     let soldAtPrice;
     let lastValue;
-
 
     let stock = new Stock(symbol);
 
@@ -71,7 +86,11 @@ request(url, function (error, response, body) {
             console.log(soldAtPrice);
         }
 
-        if (soldAtPrice && stock.amountOwned == 0 && getPercentageChange(soldAtPrice, curPrice) < -1) {
+        if (
+            soldAtPrice &&
+            stock.amountOwned == 0 &&
+            getPercentageChange(soldAtPrice, curPrice) < -1
+        ) {
             stock.buy(stock.numCanBuy(curPrice), curPrice);
             boughtInPrice = curPrice;
         }
@@ -92,25 +111,21 @@ function getPercentageChange(oldNumber, newNumber) {
     return ((newNumber - oldNumber) / oldNumber) * 100.0;
 }
 
-function parseResponse(body) {
+function parseResponse(body): Stock[] {
     const json = JSON.parse(body);
-
     const data = json[`Time Series (${interval})`];
-
-    const dataArray = [];
+    const dataArray: Stock[] = [];
 
     for (var key in data) {
         if (data.hasOwnProperty(key)) {
             const content = data[key];
             dataArray.push({
-                ...content,
                 price: parseFloat(content[priceKey]),
-                timestamp: new Date(key)
+                date: new Date(key),
+                symbol: this.symbol
             });
         }
     }
 
-    return dataArray.sort(function (a, b) {
-        return a.timestamp - b.timestamp;
-    });
+    return dataArray.sort((a, b) => a.date.getTime() - b.date.getTime());
 }
