@@ -9,54 +9,126 @@ const url = `https://www.alphavantage.co/query?function=TIME_SERIES_INTRADAY&out
 
 console.log(url);
 
-interface Share{
-    price: number;
-    stocks: Stock[];
+interface Share {
+    boughtPrice: number;
+    sold: boolean;
+    soldPrice?: number;
 }
 
-interface Stock {
+interface historicShare {
     price: number;
-    date: Date;
-    symbol: string;
+    timestamp: Date;
+}
+
+class Stock {
+    key: string;
+    shares: Share[];
+    soldShares: Share[];
+    lastBoughtInPrice: number = 0;
+    lastSeenPrice: number = 0;
+
+    getMoney: () => number;
+    addToMoney: (num: number) => void;
+
+    constructor(
+        key: string,
+        getMoney: () => number,
+        addToMoney: (num: number) => void
+    ) {
+        this.key = key;
+        this.shares = [];
+        this.soldShares = [];
+        this.getMoney = getMoney;
+        this.addToMoney = addToMoney;
+    }
+
+    incoming(price: number) {
+        if (this.shouldBuy(price)) {
+            this.buy(this.howManySharesToBuy(price), price);
+        }
+
+        this.shares.forEach(x => {
+            if (this.shouldSell(x, price)) {
+                this.prepSell(x, price);
+            }
+        });
+
+        const sharesToSell = this.shares.filter(x => x.sold).length;
+        if (sharesToSell > 0) {
+            this.sell(sharesToSell, price);
+        }
+
+        this.lastSeenPrice = price;
+    }
+
+    shouldBuy(price: number): boolean {
+        return this.getPercentageChange(this.lastBoughtInPrice, price) > -2;
+    }
+
+    shouldSell(share: Share, price: number): boolean {
+        return this.getPercentageChange(share.boughtPrice, price) > 2;
+    }
+
+    prepSell(share: Share, price: number) {
+        share.soldPrice = price;
+        share.sold = true;
+    }
+
+    sell(sharesToSell: number, price: number) {
+        this.soldShares.concat(this.shares.filter(x => x.sold));
+        this.shares = this.shares.filter(x => !x.sold);
+        this.addToMoney(sharesToSell * price);
+    }
+
+    howManySharesToBuy(price: number): number {
+        return Math.floor(this.getMoney() / price);
+    }
+
+    buy(sharesToBuy: number, price: number) {
+        for (let i = 0; i < sharesToBuy; i++) {
+            this.shares.push({
+                boughtPrice: price,
+                sold: false
+            });
+        }
+        this.lastBoughtInPrice = price;
+
+        this.addToMoney(-(sharesToBuy * price));
+    }
+
+    getPercentageChange(oldNumber: number, newNumber: number) {
+        return ((newNumber - oldNumber) / oldNumber) * 100.0;
+    }
 }
 
 class StockSession {
     money: number;
-    stocks: Stock[];
-    get stocksOwned() {
-        return this.stocks.length;
-    }
+    stocks: Map<string, Stock>;
 
     constructor() {
         this.money = 1000;
-        this.stocks = [];
+        this.stocks = new Map();
     }
 
-    numCanBuy(price) {
-        return Math.floor(this.money / price);
-    }
-
-    buy(stock: Stock) {
-        this.stocks.push(stock);
-        this.money -= stock.price;
-    }
-
-    buyMax(stock: Stock) {
-        const canBuy = this.numCanBuy(stock.price);
-        for (let i = 0; i < canBuy; i++) {
-            this.buy(stock);
+    update(key, price) {
+        let stock = this.stocks.get(key);
+        if (stock === null || stock == undefined) {
+            this.stocks.set(
+                key,
+                new Stock(
+                    key,
+                    () => {
+                        return this.money;
+                    },
+                    (num: number) => {
+                        this.money += num;
+                    }
+                )
+            );
+            stock = this.stocks.get(key);
         }
 
-    }
-
-    sell(stock: Stock) {
-        this.stocks.filter(item => item != stock);
-        this.money += stock.price;
-    }
-
-    sellAll(price) {
-        this.stocks.forEach(item)
-        this.sell(this.amountOwned, price);
+        stock.incoming(price);
     }
 }
 
@@ -64,46 +136,16 @@ request(url, function(error, response, body) {
     // Oldest first in array
     const dataArray = parseResponse(body);
 
-    let boughtInPrice;
-    let soldAtPrice;
-    let lastValue;
-
-    let stock = new Stock(symbol);
+    let session = new StockSession();
 
     dataArray.forEach((item, i) => {
-        const curPrice = item.price;
-
-        if (i == 0) {
-            boughtInPrice = curPrice;
-            stock.buy(stock.numCanBuy(curPrice), curPrice);
-        }
-
-        const percentChage = getPercentageChange(boughtInPrice, curPrice);
-
-        if (percentChage > 2 && stock.amountOwned > 0) {
-            stock.sellAll(curPrice);
-            soldAtPrice = curPrice;
-            console.log(soldAtPrice);
-        }
-
-        if (
-            soldAtPrice &&
-            stock.amountOwned == 0 &&
-            getPercentageChange(soldAtPrice, curPrice) < -1
-        ) {
-            stock.buy(stock.numCanBuy(curPrice), curPrice);
-            boughtInPrice = curPrice;
-        }
-
-        lastValue = curPrice;
+        session.update(symbol, item.price);
     });
 
     console.log(
-        stock.money,
-        boughtInPrice,
-        lastValue,
-        dataArray[0].timestamp,
-        dataArray[dataArray.length - 1].timestamp
+        session.money,
+        session.stocks.get(symbol).shares.length *
+            session.stocks.get(symbol).lastSeenPrice
     );
 });
 
@@ -111,21 +153,22 @@ function getPercentageChange(oldNumber, newNumber) {
     return ((newNumber - oldNumber) / oldNumber) * 100.0;
 }
 
-function parseResponse(body): Stock[] {
+function parseResponse(body): historicShare[] {
     const json = JSON.parse(body);
     const data = json[`Time Series (${interval})`];
-    const dataArray: Stock[] = [];
+    const dataArray: historicShare[] = [];
 
     for (var key in data) {
         if (data.hasOwnProperty(key)) {
             const content = data[key];
             dataArray.push({
                 price: parseFloat(content[priceKey]),
-                date: new Date(key),
-                symbol: this.symbol
+                timestamp: new Date(key)
             });
         }
     }
 
-    return dataArray.sort((a, b) => a.date.getTime() - b.date.getTime());
+    return dataArray.sort(
+        (a, b) => a.timestamp.getTime() - b.timestamp.getTime()
+    );
 }
