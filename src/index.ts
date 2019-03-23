@@ -9,21 +9,21 @@ const url = `https://www.alphavantage.co/query?function=TIME_SERIES_INTRADAY&out
 
 console.log(url);
 
-interface Share {
-    boughtPrice: number;
-    sold: boolean;
-    soldPrice?: number;
+interface historicShare {
+    price: number;
+    timestamp: Date;
 }
 
-interface historicShare {
+interface Purchase {
+    amount: number;
     price: number;
     timestamp: Date;
 }
 
 class Stock {
     key: string;
-    shares: Share[];
-    soldShares: Share[];
+    purchases: Purchase[];
+    oldPurchases: Purchase[];
     lastBoughtInPrice: number = 0;
     lastSeenPrice: number = 0;
 
@@ -36,8 +36,8 @@ class Stock {
         addToMoney: (num: number) => void
     ) {
         this.key = key;
-        this.shares = [];
-        this.soldShares = [];
+        this.purchases = [];
+        this.oldPurchases = [];
         this.getMoney = getMoney;
         this.addToMoney = addToMoney;
     }
@@ -47,15 +47,15 @@ class Stock {
             this.buy(this.howManySharesToBuy(price), price);
         }
 
-        this.shares.forEach(x => {
-            if (this.shouldSell(x, price)) {
-                this.prepSell(x, price);
+        var i = this.purchases.length;
+        while (i--) {
+            const purchase = this.purchases[i];
+            if (this.shouldSell(purchase, price)) {
+                const sold = this.sell(purchase, price);
+                if (sold) {
+                    this.purchases.splice(i, 1);
+                }
             }
-        });
-
-        const sharesToSell = this.shares.filter(x => x.sold).length;
-        if (sharesToSell > 0) {
-            this.sell(sharesToSell, price);
         }
 
         this.lastSeenPrice = price;
@@ -65,19 +65,14 @@ class Stock {
         return this.getPercentageChange(this.lastBoughtInPrice, price) > -2;
     }
 
-    shouldSell(share: Share, price: number): boolean {
-        return this.getPercentageChange(share.boughtPrice, price) > 2;
+    shouldSell(purchase: Purchase, price: number): boolean {
+        return this.getPercentageChange(purchase.price, price) > 2;
     }
 
-    prepSell(share: Share, price: number) {
-        share.soldPrice = price;
-        share.sold = true;
-    }
-
-    sell(sharesToSell: number, price: number) {
-        this.soldShares.concat(this.shares.filter(x => x.sold));
-        this.shares = this.shares.filter(x => !x.sold);
-        this.addToMoney(sharesToSell * price);
+    sell(purchase: Purchase, price: number): boolean {
+        this.oldPurchases.push(purchase);
+        this.addToMoney(purchase.amount * price);
+        return true;
     }
 
     howManySharesToBuy(price: number): number {
@@ -85,12 +80,11 @@ class Stock {
     }
 
     buy(sharesToBuy: number, price: number) {
-        for (let i = 0; i < sharesToBuy; i++) {
-            this.shares.push({
-                boughtPrice: price,
-                sold: false
-            });
-        }
+        this.purchases.push({
+            amount: sharesToBuy,
+            price: price,
+            timestamp: new Date()
+        });
         this.lastBoughtInPrice = price;
 
         this.addToMoney(-(sharesToBuy * price));
@@ -98,6 +92,12 @@ class Stock {
 
     getPercentageChange(oldNumber: number, newNumber: number) {
         return ((newNumber - oldNumber) / oldNumber) * 100.0;
+    }
+
+    getUnsoldPrice(): number {
+        return this.purchases
+            .map(x => x.amount * x.price)
+            .reduce((x, y) => x + y);
     }
 }
 
@@ -142,11 +142,7 @@ request(url, function(error, response, body) {
         session.update(symbol, item.price);
     });
 
-    console.log(
-        session.money,
-        session.stocks.get(symbol).shares.length *
-            session.stocks.get(symbol).lastSeenPrice
-    );
+    console.log(session.money, session.stocks.get(symbol).getUnsoldPrice());
 });
 
 function getPercentageChange(oldNumber, newNumber) {
